@@ -1,0 +1,26 @@
+{
+    "manifest_version": 3,
+    "name": "Antigravity Todo List",
+    "version": "1.0",
+    "description": "A simple todo list extension with Sidebar and Popup support.",
+    "icons": {
+        "16": "src/assets/icon-16.png",
+        "32": "src/assets/icon-32.png",
+        "48": "src/assets/icon-48.png",
+        "128": "src/assets/icon-128.png"
+    },
+    "permissions": [
+        "storage",
+        "sidePanel"
+    ],
+    "background": {
+        "service_worker": "src/background.js"
+    },
+    "action": {
+        "default_popup": "src/popup.html",
+        "default_title": "Open Todo List"
+    },
+    "side_panel": {
+        "default_path": "src/sidebar.html"
+    }
+}
