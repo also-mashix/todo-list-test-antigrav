@@ -232,23 +232,77 @@ function handleDragStart(e) {
 function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const item = e.target.closest('.todo-item');
-    if (item && item !== this) {
-        // Optional: Add visual indicator of where it will drop
+
+    const targetItem = e.target.closest('.todo-item');
+    if (!targetItem || targetItem.dataset.index == draggedItemIndex) {
+        // Remove all drop indicators if not over a valid target
+        document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
+            el.classList.remove('drop-indicator-above', 'drop-indicator-below');
+        });
+        return;
+    }
+
+    // Calculate if we should insert above or below the target
+    const rect = targetItem.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    const isAbove = e.clientY < midpoint;
+
+    // Remove all previous indicators
+    document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
+        el.classList.remove('drop-indicator-above', 'drop-indicator-below');
+    });
+
+    // Add indicator to the target item
+    if (isAbove) {
+        targetItem.classList.add('drop-indicator-above');
+    } else {
+        targetItem.classList.add('drop-indicator-below');
     }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
+
+    // Remove all drop indicators
+    document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
+        el.classList.remove('drop-indicator-above', 'drop-indicator-below');
+    });
+
     const targetItem = e.target.closest('.todo-item');
-    if (targetItem) {
-        const targetIndex = +targetItem.dataset.index;
-        if (draggedItemIndex !== null && draggedItemIndex !== targetIndex) {
-            const [draggedItem] = todos.splice(draggedItemIndex, 1);
-            todos.splice(targetIndex, 0, draggedItem);
-            await saveAndRender(); // Await to prevent race conditions
-        }
+    if (!targetItem || draggedItemIndex === null) {
+        return;
     }
+
+    const targetIndex = +targetItem.dataset.index;
+    if (draggedItemIndex === targetIndex) {
+        return; // Dropped on itself, do nothing
+    }
+
+    // Calculate if we should insert above or below the target
+    const rect = targetItem.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    const isAbove = e.clientY < midpoint;
+
+    // Remove the dragged item from its current position
+    const [draggedItem] = todos.splice(draggedItemIndex, 1);
+
+    // Calculate the new insertion index
+    let insertIndex = targetIndex;
+
+    // If we removed an item before the target, the target index shifts down by 1
+    if (draggedItemIndex < targetIndex) {
+        insertIndex = targetIndex - 1;
+    }
+
+    // If we want to insert below, increment the index
+    if (!isAbove) {
+        insertIndex++;
+    }
+
+    // Insert the item at the calculated position
+    todos.splice(insertIndex, 0, draggedItem);
+
+    await saveAndRender(); // Await to prevent race conditions
 }
 
 function handleDragEnd(e) {
