@@ -11,7 +11,18 @@ const settingsModal = document.getElementById('settings-modal');
 const closeModalBtn = document.getElementById('close-modal-btn');
 const themeList = document.getElementById('theme-list');
 
+// Security constants
+const MAX_TODO_LENGTH = 5000;
+
 let todos = [];
+
+// Security utility: Sanitize HTML to prevent XSS
+function sanitizeHTML(text) {
+    // Strip all HTML tags and return plain text
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.textContent || '';
+}
 
 // Initialize
 async function init() {
@@ -52,10 +63,19 @@ function renderThemeList() {
     themes.forEach(theme => {
         const li = document.createElement('li');
         li.className = `theme-option ${ThemeManager.currentTheme === theme.id ? 'active' : ''}`;
-        li.innerHTML = `
-            <span>${theme.name}</span>
-            ${ThemeManager.currentTheme === theme.id ? '<span>&#10003;</span>' : ''}
-        `;
+
+        // Create theme name span safely
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = theme.name;
+        li.appendChild(nameSpan);
+
+        // Add checkmark if active
+        if (ThemeManager.currentTheme === theme.id) {
+            const checkSpan = document.createElement('span');
+            checkSpan.textContent = '✓';
+            li.appendChild(checkSpan);
+        }
+
         li.addEventListener('click', () => {
             ThemeManager.applyTheme(theme.id);
             renderThemeList(); // Update UI to reflect change
@@ -75,7 +95,7 @@ function renderTodos() {
         // Drag Handle
         const handle = document.createElement('span');
         handle.className = 'drag-handle';
-        handle.innerHTML = '&#9776;'; // Hamburger icon
+        handle.textContent = '☰'; // Hamburger icon
         li.appendChild(handle);
 
         // Checkbox
@@ -85,12 +105,26 @@ function renderTodos() {
         checkbox.addEventListener('change', () => toggleTodo(index));
         li.appendChild(checkbox);
 
-        // Content
+        // Content - with XSS protection
         const span = document.createElement('span');
         span.className = 'todo-content';
         span.textContent = todo.text;
         span.contentEditable = true;
-        span.addEventListener('blur', () => updateTodo(index, span.textContent));
+
+        // Prevent pasting HTML content
+        span.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+            const sanitized = sanitizeHTML(text);
+            document.execCommand('insertText', false, sanitized);
+        });
+
+        span.addEventListener('blur', () => {
+            // Sanitize content when editing is done
+            const sanitized = sanitizeHTML(span.textContent);
+            updateTodo(index, sanitized);
+        });
+
         span.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -102,7 +136,7 @@ function renderTodos() {
         // Delete Button
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
-        deleteBtn.innerHTML = '&times;';
+        deleteBtn.textContent = '×';
         deleteBtn.addEventListener('click', () => deleteTodo(index));
         li.appendChild(deleteBtn);
 
@@ -118,10 +152,31 @@ function renderTodos() {
 
 async function addTodo() {
     const text = newTodoInput.value.trim();
-    if (text) {
-        todos.push({ text, completed: false, id: Date.now() });
+
+    // Input validation
+    if (!text) {
+        return;
+    }
+
+    if (text.length > MAX_TODO_LENGTH) {
+        alert(`Todo is too long. Maximum length is ${MAX_TODO_LENGTH} characters.`);
+        return;
+    }
+
+    // Sanitize input
+    const sanitized = sanitizeHTML(text);
+
+    try {
+        todos.push({
+            text: sanitized,
+            completed: false,
+            id: crypto.randomUUID()
+        });
         newTodoInput.value = '';
         await saveAndRender();
+    } catch (error) {
+        console.error('Error adding todo:', error);
+        alert('Failed to add todo. Please try again.');
     }
 }
 
@@ -132,14 +187,27 @@ async function toggleTodo(index) {
 
 async function updateTodo(index, newText) {
     const text = newText.trim();
-    if (text) {
-        todos[index].text = text;
-    } else {
-        // If empty, maybe delete? Or just revert? Let's revert for now or keep empty if user insists, but usually we don't want empty todos.
-        // Let's delete if empty for better UX
+
+    if (!text) {
+        // Delete if empty for better UX
         todos.splice(index, 1);
+    } else if (text.length > MAX_TODO_LENGTH) {
+        alert(`Todo is too long. Maximum length is ${MAX_TODO_LENGTH} characters.`);
+        // Revert to original text
+        renderTodos();
+        return;
+    } else {
+        // Sanitize and update
+        todos[index].text = sanitizeHTML(text);
     }
-    await saveAndRender();
+
+    try {
+        await saveAndRender();
+    } catch (error) {
+        console.error('Error updating todo:', error);
+        alert('Failed to update todo. Please try again.');
+        renderTodos(); // Revert UI
+    }
 }
 
 async function deleteTodo(index) {
@@ -170,7 +238,7 @@ function handleDragOver(e) {
     }
 }
 
-function handleDrop(e) {
+async function handleDrop(e) {
     e.preventDefault();
     const targetItem = e.target.closest('.todo-item');
     if (targetItem) {
@@ -178,7 +246,7 @@ function handleDrop(e) {
         if (draggedItemIndex !== null && draggedItemIndex !== targetIndex) {
             const [draggedItem] = todos.splice(draggedItemIndex, 1);
             todos.splice(targetIndex, 0, draggedItem);
-            saveAndRender();
+            await saveAndRender(); // Await to prevent race conditions
         }
     }
 }

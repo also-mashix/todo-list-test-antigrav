@@ -11,12 +11,22 @@ export const ThemeManager = {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
             return new Promise((resolve) => {
                 chrome.storage.sync.get(['theme'], (result) => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Error loading theme:', chrome.runtime.lastError);
+                        resolve('system');
+                        return;
+                    }
                     resolve(result.theme || 'system');
                 });
             });
         } else {
             // Fallback for local testing
-            return Promise.resolve(localStorage.getItem('theme') || 'system');
+            try {
+                return Promise.resolve(localStorage.getItem('theme') || 'system');
+            } catch (error) {
+                console.error('Error loading theme from localStorage:', error);
+                return Promise.resolve('system');
+            }
         }
     },
     applyTheme(themeName) {
@@ -39,9 +49,17 @@ export const ThemeManager = {
     },
     saveTheme(themeName) {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-            chrome.storage.sync.set({ theme: themeName });
+            chrome.storage.sync.set({ theme: themeName }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error('Error saving theme:', chrome.runtime.lastError);
+                }
+            });
         } else {
-            localStorage.setItem('theme', themeName);
+            try {
+                localStorage.setItem('theme', themeName);
+            } catch (error) {
+                console.error('Error saving theme to localStorage:', error);
+            }
         }
     },
     getAvailableThemes() {
