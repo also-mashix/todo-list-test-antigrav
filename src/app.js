@@ -222,6 +222,7 @@ async function saveAndRender() {
 
 // Drag and Drop Logic
 let draggedItemIndex = null;
+let dropIndicator = null;
 
 function handleDragStart(e) {
     draggedItemIndex = +this.dataset.index;
@@ -234,39 +235,46 @@ function handleDragOver(e) {
     e.dataTransfer.dropEffect = 'move';
 
     const targetItem = e.target.closest('.todo-item');
-    if (!targetItem || targetItem.dataset.index == draggedItemIndex) {
-        // Remove all drop indicators if not over a valid target
-        document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
-            el.classList.remove('drop-indicator-above', 'drop-indicator-below');
-        });
+    if (!targetItem || +targetItem.dataset.index === draggedItemIndex) {
+        removeDropIndicator();
         return;
     }
 
-    // Calculate if we should insert above or below the target
+    // Calculate if cursor is in top or bottom half of target
     const rect = targetItem.getBoundingClientRect();
     const midpoint = rect.top + rect.height / 2;
-    const isAbove = e.clientY < midpoint;
+    const isTopHalf = e.clientY < midpoint;
 
-    // Remove all previous indicators
-    document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
-        el.classList.remove('drop-indicator-above', 'drop-indicator-below');
-    });
+    // Show drop indicator
+    showDropIndicator(targetItem, isTopHalf);
 
-    // Add indicator to the target item
-    if (isAbove) {
-        targetItem.classList.add('drop-indicator-above');
+    // Store drop position for handleDrop
+    targetItem.dataset.dropPosition = isTopHalf ? 'before' : 'after';
+}
+
+function showDropIndicator(targetItem, isBefore) {
+    removeDropIndicator();
+
+    dropIndicator = document.createElement('div');
+    dropIndicator.className = 'drop-indicator';
+
+    if (isBefore) {
+        targetItem.parentNode.insertBefore(dropIndicator, targetItem);
     } else {
-        targetItem.classList.add('drop-indicator-below');
+        targetItem.parentNode.insertBefore(dropIndicator, targetItem.nextSibling);
+    }
+}
+
+function removeDropIndicator() {
+    if (dropIndicator && dropIndicator.parentNode) {
+        dropIndicator.parentNode.removeChild(dropIndicator);
+        dropIndicator = null;
     }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
-
-    // Remove all drop indicators
-    document.querySelectorAll('.drop-indicator-above, .drop-indicator-below').forEach(el => {
-        el.classList.remove('drop-indicator-above', 'drop-indicator-below');
-    });
+    removeDropIndicator();
 
     const targetItem = e.target.closest('.todo-item');
     if (!targetItem || draggedItemIndex === null) {
@@ -274,39 +282,31 @@ async function handleDrop(e) {
     }
 
     const targetIndex = +targetItem.dataset.index;
+    const dropPosition = targetItem.dataset.dropPosition;
+
     if (draggedItemIndex === targetIndex) {
-        return; // Dropped on itself, do nothing
+        return;
     }
 
-    // Calculate if we should insert above or below the target
-    const rect = targetItem.getBoundingClientRect();
-    const midpoint = rect.top + rect.height / 2;
-    const isAbove = e.clientY < midpoint;
-
-    // Remove the dragged item from its current position
+    // Remove dragged item from array
     const [draggedItem] = todos.splice(draggedItemIndex, 1);
 
-    // Calculate the new insertion index
-    let insertIndex = targetIndex;
-
-    // If we removed an item before the target, the target index shifts down by 1
-    if (draggedItemIndex < targetIndex) {
-        insertIndex = targetIndex - 1;
+    // Calculate new insert position
+    let insertIndex;
+    if (dropPosition === 'before') {
+        insertIndex = targetIndex > draggedItemIndex ? targetIndex - 1 : targetIndex;
+    } else {
+        insertIndex = targetIndex >= draggedItemIndex ? targetIndex : targetIndex + 1;
     }
 
-    // If we want to insert below, increment the index
-    if (!isAbove) {
-        insertIndex++;
-    }
-
-    // Insert the item at the calculated position
+    // Insert at new position
     todos.splice(insertIndex, 0, draggedItem);
-
-    await saveAndRender(); // Await to prevent race conditions
+    await saveAndRender();
 }
 
 function handleDragEnd(e) {
     this.classList.remove('dragging');
+    removeDropIndicator();
     draggedItemIndex = null;
 }
 
