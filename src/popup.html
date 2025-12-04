@@ -2,28 +2,44 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Todo List</title>
-    <link rel="stylesheet" href="style.css">
-    <style>
-        body {
-            width: 350px;
-            height: 500px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo List</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      width: 350px;
+      height: 500px;
+    }
+  </style>
 </head>
 
 <body>
-    <div class="container">
-        <h1>My Tasks</h1>
-        <div class="input-group">
-            <input type="text" id="new-todo" placeholder="Add a new task...">
-            <button id="add-btn">Add</button>
-        </div>
-        <ul id="todo-list"></ul>
+  <div class="container">
+    <div class="header-row">
+      <h1>My Tasks</h1>
+      <button id="settings-btn" class="settings-btn" aria-label="Settings">&#9881;</button>
     </div>
-    <script type="module" src="app.js"></script>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Select Theme</h2>
+          <button id="close-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <ul id="theme-list" class="theme-list">
+          <!-- Themes injected here -->
+        </ul>
+      </div>
+    </div>
+    <div class="input-group">
+      <input type="text" id="new-todo" placeholder="Add a new task...">
+      <button id="add-btn">Add</button>
+    </div>
+    <ul id="todo-list"></ul>
+  </div>
+  <script type="module" src="app.js"></script>
 </body>
 
 </html>

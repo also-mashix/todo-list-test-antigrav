@@ -1,21 +1,29 @@
 const STORAGE_KEY = 'antigravity_todos';
 
 export const storage = {
-    getTodos: async () => {
-        try {
-            const result = await chrome.storage.local.get(STORAGE_KEY);
-            return result[STORAGE_KEY] || [];
-        } catch (e) {
-            console.error('Failed to load todos:', e);
-            return [];
+    async getTodos() {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
+            return new Promise((resolve) => {
+                chrome.storage.sync.get(['todos'], (result) => {
+                    resolve(result.todos || []);
+                });
+            });
+        } else {
+            const stored = localStorage.getItem('todos');
+            return Promise.resolve(stored ? JSON.parse(stored) : []);
         }
     },
 
-    saveTodos: async (todos) => {
-        try {
-            await chrome.storage.local.set({ [STORAGE_KEY]: todos });
-        } catch (e) {
-            console.error('Failed to save todos:', e);
+    async saveTodos(todos) {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
+            return new Promise((resolve) => {
+                chrome.storage.sync.set({ todos }, () => {
+                    resolve();
+                });
+            });
+        } else {
+            localStorage.setItem('todos', JSON.stringify(todos));
+            return Promise.resolve();
         }
     }
 };

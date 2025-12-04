@@ -1,19 +1,66 @@
 import { storage } from './storage.js';
+import { ThemeManager } from './theme-manager.js';
 
 const todoList = document.getElementById('todo-list');
 const newTodoInput = document.getElementById('new-todo');
 const addBtn = document.getElementById('add-btn');
 
+// Settings UI Elements
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeModalBtn = document.getElementById('close-modal-btn');
+const themeList = document.getElementById('theme-list');
+
 let todos = [];
 
 // Initialize
 async function init() {
+    // Initialize Theme
+    await ThemeManager.init();
+    renderThemeList();
+
+    // Load Todos
     todos = await storage.getTodos();
     renderTodos();
 
     addBtn.addEventListener('click', addTodo);
     newTodoInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addTodo();
+    });
+
+    // Settings Event Listeners
+    settingsBtn.addEventListener('click', openSettings);
+    closeModalBtn.addEventListener('click', closeSettings);
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) closeSettings();
+    });
+}
+
+function openSettings() {
+    settingsModal.classList.add('open');
+    renderThemeList(); // Re-render to show active state correctly
+}
+
+function closeSettings() {
+    settingsModal.classList.remove('open');
+}
+
+function renderThemeList() {
+    themeList.innerHTML = '';
+    const themes = ThemeManager.getAvailableThemes();
+
+    themes.forEach(theme => {
+        const li = document.createElement('li');
+        li.className = `theme-option ${ThemeManager.currentTheme === theme.id ? 'active' : ''}`;
+        li.innerHTML = `
+            <span>${theme.name}</span>
+            ${ThemeManager.currentTheme === theme.id ? '<span>&#10003;</span>' : ''}
+        `;
+        li.addEventListener('click', () => {
+            ThemeManager.applyTheme(theme.id);
+            renderThemeList(); // Update UI to reflect change
+        });
+        themeList.appendChild(li);
     });
 }
 
