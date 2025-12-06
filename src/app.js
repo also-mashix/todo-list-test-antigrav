@@ -32,12 +32,29 @@ async function init() {
 
     // Load Todos
     todos = await storage.getTodos();
+
+    // Migration: Ensure all todos have IDs
+    let hasChanges = false;
+    todos.forEach(todo => {
+        if (!todo.id) {
+            todo.id = crypto.randomUUID();
+            hasChanges = true;
+        }
+    });
+    if (hasChanges) {
+        await storage.saveTodos(todos);
+    }
+
     renderTodos();
 
     addBtn.addEventListener('click', addTodo);
     newTodoInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addTodo();
     });
+
+    // Global Drag Events
+    todoList.addEventListener('dragover', handleDragOver);
+    todoList.addEventListener('drop', handleDrop);
 
     // Settings Event Listeners
     settingsBtn.addEventListener('click', openSettings);
@@ -89,13 +106,20 @@ function renderTodos() {
     todos.forEach((todo, index) => {
         const li = document.createElement('li');
         li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
-        li.draggable = true;
+        // li.draggable = true; // Removed to prevent conflict with text selection
         li.dataset.index = index;
+        li.dataset.id = todo.id;
 
         // Drag Handle
         const handle = document.createElement('span');
         handle.className = 'drag-handle';
         handle.textContent = '☰'; // Hamburger icon
+
+        // Only allow dragging when using the handle
+        handle.addEventListener('mousedown', () => li.draggable = true);
+        handle.addEventListener('mouseup', () => li.draggable = false);
+        handle.addEventListener('mouseout', () => li.draggable = false);
+
         li.appendChild(handle);
 
         // Checkbox
@@ -142,8 +166,6 @@ function renderTodos() {
 
         // Drag Events
         li.addEventListener('dragstart', handleDragStart);
-        li.addEventListener('dragover', handleDragOver);
-        li.addEventListener('drop', handleDrop);
         li.addEventListener('dragend', handleDragEnd);
 
         todoList.appendChild(li);
@@ -221,93 +243,93 @@ async function saveAndRender() {
 }
 
 // Drag and Drop Logic
-let draggedItemIndex = null;
-let dropIndicator = null;
+let draggedItem = null;
+let placeholder = null;
 
 function handleDragStart(e) {
-    draggedItemIndex = +this.dataset.index;
-    this.classList.add('dragging');
+    draggedItem = this;
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML); // For compatibility
+
+    // Create placeholder
+    placeholder = document.createElement('li');
+    placeholder.className = 'sortable-placeholder';
+    placeholder.style.height = `${this.offsetHeight}px`;
+
+    // Delay hiding the original element so the drag ghost is created properly
+    requestAnimationFrame(() => {
+        this.classList.add('dragging-original');
+        this.parentNode.insertBefore(placeholder, this.nextSibling);
+    });
 }
 
 function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
 
-    const targetItem = e.target.closest('.todo-item');
-    if (!targetItem || +targetItem.dataset.index === draggedItemIndex) {
-        removeDropIndicator();
-        return;
-    }
+    const afterElement = getDragAfterElement(todoList, e.clientY);
 
-    // Calculate if cursor is in top or bottom half of target
-    const rect = targetItem.getBoundingClientRect();
-    const midpoint = rect.top + rect.height / 2;
-    const isTopHalf = e.clientY < midpoint;
-
-    // Show drop indicator
-    showDropIndicator(targetItem, isTopHalf);
-
-    // Store drop position for handleDrop
-    targetItem.dataset.dropPosition = isTopHalf ? 'before' : 'after';
-}
-
-function showDropIndicator(targetItem, isBefore) {
-    removeDropIndicator();
-
-    dropIndicator = document.createElement('div');
-    dropIndicator.className = 'drop-indicator';
-
-    if (isBefore) {
-        targetItem.parentNode.insertBefore(dropIndicator, targetItem);
+    if (afterElement == null) {
+        todoList.appendChild(placeholder);
     } else {
-        targetItem.parentNode.insertBefore(dropIndicator, targetItem.nextSibling);
-    }
-}
-
-function removeDropIndicator() {
-    if (dropIndicator && dropIndicator.parentNode) {
-        dropIndicator.parentNode.removeChild(dropIndicator);
-        dropIndicator = null;
+        todoList.insertBefore(placeholder, afterElement);
     }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
-    removeDropIndicator();
 
-    const targetItem = e.target.closest('.todo-item');
-    if (!targetItem || draggedItemIndex === null) {
-        return;
-    }
+    if (!draggedItem || !placeholder.parentNode) return;
 
-    const targetIndex = +targetItem.dataset.index;
-    const dropPosition = targetItem.dataset.dropPosition;
+    // Insert dragged item at placeholder position
+    placeholder.parentNode.insertBefore(draggedItem, placeholder);
+    placeholder.remove();
+    draggedItem.classList.remove('dragging-original');
 
-    if (draggedItemIndex === targetIndex) {
-        return;
-    }
+    // Reconstruct todos array based on new DOM order
+    const newTodos = [];
+    const items = todoList.querySelectorAll('.todo-item');
 
-    // Remove dragged item from array
-    const [draggedItem] = todos.splice(draggedItemIndex, 1);
+    items.forEach(item => {
+        const id = item.dataset.id;
+        const todo = todos.find(t => t.id === id);
+        if (todo) {
+            newTodos.push(todo);
+        }
+    });
 
-    // Calculate new insert position
-    let insertIndex;
-    if (dropPosition === 'before') {
-        insertIndex = targetIndex > draggedItemIndex ? targetIndex - 1 : targetIndex;
-    } else {
-        insertIndex = targetIndex >= draggedItemIndex ? targetIndex : targetIndex + 1;
-    }
-
-    // Insert at new position
-    todos.splice(insertIndex, 0, draggedItem);
+    todos = newTodos;
     await saveAndRender();
+
+    draggedItem = null;
+    placeholder = null;
 }
 
 function handleDragEnd(e) {
-    this.classList.remove('dragging');
-    removeDropIndicator();
-    draggedItemIndex = null;
+    if (draggedItem) {
+        draggedItem.classList.remove('dragging-original');
+        draggedItem.draggable = false; // Reset draggable state
+    }
+    if (placeholder && placeholder.parentNode) {
+        placeholder.remove();
+    }
+    draggedItem = null;
+    placeholder = null;
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.todo-item:not(.dragging-original)')];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
 init();

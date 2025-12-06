@@ -95,15 +95,24 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: grab;
-  transition: all 0.2s ease;
+  cursor: default;
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .todo-item.dragging {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: grabbing;
-  transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.todo-item.dragging-original {
+  display: none !important;
+}
+
+.sortable-placeholder {
+  background-color: rgba(0, 0, 0, 0.03);
+  border: 2px dashed var(--border-color);
+  border-radius: 4px;
+  margin-bottom: 8px;
 }
 
 .todo-item.completed span {
@@ -111,31 +120,10 @@ button:hover {
   opacity: 0.6;
 }
 
-/* Drop Indicator */
-.drop-indicator {
-  height: 3px;
-  background: var(--primary-color);
-  margin: 4px 0;
-  border-radius: 2px;
-  box-shadow: 0 0 8px var(--primary-color);
-  animation: pulse 0.6s ease-in-out infinite alternate;
-}
-
-@keyframes pulse {
-  from {
-    opacity: 0.6;
-    transform: scaleY(1);
-  }
-
-  to {
-    opacity: 1;
-    transform: scaleY(1.5);
-  }
-}
-
 .todo-content {
   flex: 1;
   word-break: break-word;
+  cursor: text;
 }
 
 .delete-btn {
