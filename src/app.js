@@ -16,12 +16,9 @@ const MAX_TODO_LENGTH = 5000;
 
 let todos = [];
 
-// Security utility: Sanitize HTML to prevent XSS
+// Security utility: Ensure text is treated as plain string
 function sanitizeHTML(text) {
-    // Strip all HTML tags and return plain text
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.textContent || '';
+    return text ? String(text) : '';
 }
 
 // Initialize
@@ -187,32 +184,57 @@ async function addTodo() {
 
     // Sanitize input
     const sanitized = sanitizeHTML(text);
+    const newTodo = {
+        text: sanitized,
+        completed: false,
+        id: crypto.randomUUID()
+    };
+
+    todos.push(newTodo);
+    const previousValue = newTodoInput.value;
+    newTodoInput.value = '';
 
     try {
-        todos.push({
-            text: sanitized,
-            completed: false,
-            id: crypto.randomUUID()
-        });
-        newTodoInput.value = '';
         await saveAndRender();
     } catch (error) {
         console.error('Error adding todo:', error);
         alert('Failed to add todo. Please try again.');
+        // Revert state
+        todos.pop();
+        newTodoInput.value = previousValue;
+        renderTodos();
     }
 }
 
 async function toggleTodo(index) {
-    todos[index].completed = !todos[index].completed;
-    await saveAndRender();
+    const wasCompleted = todos[index].completed;
+    todos[index].completed = !wasCompleted;
+
+    try {
+        await saveAndRender();
+    } catch (error) {
+        console.error('Error toggling todo:', error);
+        todos[index].completed = wasCompleted; // Revert
+        renderTodos();
+    }
 }
 
 async function updateTodo(index, newText) {
     const text = newText.trim();
+    const oldText = todos[index].text;
 
     if (!text) {
         // Delete if empty for better UX
-        todos.splice(index, 1);
+        // We use deleteTodo logic but specifically here to simplify
+        const deleted = todos.splice(index, 1)[0];
+        try {
+            await saveAndRender();
+        } catch (error) {
+            // Revert
+            todos.splice(index, 0, deleted);
+            renderTodos();
+        }
+        return;
     } else if (text.length > MAX_TODO_LENGTH) {
         alert(`Todo is too long. Maximum length is ${MAX_TODO_LENGTH} characters.`);
         // Revert to original text
@@ -228,13 +250,22 @@ async function updateTodo(index, newText) {
     } catch (error) {
         console.error('Error updating todo:', error);
         alert('Failed to update todo. Please try again.');
-        renderTodos(); // Revert UI
+        todos[index].text = oldText; // Revert
+        renderTodos();
     }
 }
 
 async function deleteTodo(index) {
-    todos.splice(index, 1);
-    await saveAndRender();
+    const deleted = todos.splice(index, 1)[0];
+
+    try {
+        await saveAndRender();
+    } catch (error) {
+        console.error('Error deleting todo:', error);
+        // Revert
+        todos.splice(index, 0, deleted);
+        renderTodos();
+    }
 }
 
 async function saveAndRender() {
