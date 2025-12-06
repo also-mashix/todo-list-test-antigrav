@@ -16,12 +16,9 @@ const MAX_TODO_LENGTH = 5000;
 
 let todos = [];
 
-// Security utility: Sanitize HTML to prevent XSS
+// Security utility: Ensure text is treated as plain string
 function sanitizeHTML(text) {
-    // Strip all HTML tags and return plain text
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.textContent || '';
+    return text ? String(text) : '';
 }
 
 // Initialize
@@ -32,12 +29,29 @@ async function init() {
 
     // Load Todos
     todos = await storage.getTodos();
+
+    // Migration: Ensure all todos have IDs
+    let hasChanges = false;
+    todos.forEach(todo => {
+        if (!todo.id) {
+            todo.id = crypto.randomUUID();
+            hasChanges = true;
+        }
+    });
+    if (hasChanges) {
+        await storage.saveTodos(todos);
+    }
+
     renderTodos();
 
     addBtn.addEventListener('click', addTodo);
     newTodoInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addTodo();
     });
+
+    // Global Drag Events
+    todoList.addEventListener('dragover', handleDragOver);
+    todoList.addEventListener('drop', handleDrop);
 
     // Settings Event Listeners
     settingsBtn.addEventListener('click', openSettings);
@@ -89,13 +103,20 @@ function renderTodos() {
     todos.forEach((todo, index) => {
         const li = document.createElement('li');
         li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
-        li.draggable = true;
+        // li.draggable = true; // Removed to prevent conflict with text selection
         li.dataset.index = index;
+        li.dataset.id = todo.id;
 
         // Drag Handle
         const handle = document.createElement('span');
         handle.className = 'drag-handle';
         handle.textContent = '☰'; // Hamburger icon
+
+        // Only allow dragging when using the handle
+        handle.addEventListener('mousedown', () => li.draggable = true);
+        handle.addEventListener('mouseup', () => li.draggable = false);
+        handle.addEventListener('mouseout', () => li.draggable = false);
+
         li.appendChild(handle);
 
         // Checkbox
@@ -142,8 +163,6 @@ function renderTodos() {
 
         // Drag Events
         li.addEventListener('dragstart', handleDragStart);
-        li.addEventListener('dragover', handleDragOver);
-        li.addEventListener('drop', handleDrop);
         li.addEventListener('dragend', handleDragEnd);
 
         todoList.appendChild(li);
@@ -165,32 +184,57 @@ async function addTodo() {
 
     // Sanitize input
     const sanitized = sanitizeHTML(text);
+    const newTodo = {
+        text: sanitized,
+        completed: false,
+        id: crypto.randomUUID()
+    };
+
+    todos.push(newTodo);
+    const previousValue = newTodoInput.value;
+    newTodoInput.value = '';
 
     try {
-        todos.push({
-            text: sanitized,
-            completed: false,
-            id: crypto.randomUUID()
-        });
-        newTodoInput.value = '';
         await saveAndRender();
     } catch (error) {
         console.error('Error adding todo:', error);
         alert('Failed to add todo. Please try again.');
+        // Revert state
+        todos.pop();
+        newTodoInput.value = previousValue;
+        renderTodos();
     }
 }
 
 async function toggleTodo(index) {
-    todos[index].completed = !todos[index].completed;
-    await saveAndRender();
+    const wasCompleted = todos[index].completed;
+    todos[index].completed = !wasCompleted;
+
+    try {
+        await saveAndRender();
+    } catch (error) {
+        console.error('Error toggling todo:', error);
+        todos[index].completed = wasCompleted; // Revert
+        renderTodos();
+    }
 }
 
 async function updateTodo(index, newText) {
     const text = newText.trim();
+    const oldText = todos[index].text;
 
     if (!text) {
         // Delete if empty for better UX
-        todos.splice(index, 1);
+        // We use deleteTodo logic but specifically here to simplify
+        const deleted = todos.splice(index, 1)[0];
+        try {
+            await saveAndRender();
+        } catch (error) {
+            // Revert
+            todos.splice(index, 0, deleted);
+            renderTodos();
+        }
+        return;
     } else if (text.length > MAX_TODO_LENGTH) {
         alert(`Todo is too long. Maximum length is ${MAX_TODO_LENGTH} characters.`);
         // Revert to original text
@@ -206,13 +250,22 @@ async function updateTodo(index, newText) {
     } catch (error) {
         console.error('Error updating todo:', error);
         alert('Failed to update todo. Please try again.');
-        renderTodos(); // Revert UI
+        todos[index].text = oldText; // Revert
+        renderTodos();
     }
 }
 
 async function deleteTodo(index) {
-    todos.splice(index, 1);
-    await saveAndRender();
+    const deleted = todos.splice(index, 1)[0];
+
+    try {
+        await saveAndRender();
+    } catch (error) {
+        console.error('Error deleting todo:', error);
+        // Revert
+        todos.splice(index, 0, deleted);
+        renderTodos();
+    }
 }
 
 async function saveAndRender() {
@@ -221,39 +274,93 @@ async function saveAndRender() {
 }
 
 // Drag and Drop Logic
-let draggedItemIndex = null;
+let draggedItem = null;
+let placeholder = null;
 
 function handleDragStart(e) {
-    draggedItemIndex = +this.dataset.index;
-    this.classList.add('dragging');
+    draggedItem = this;
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML); // For compatibility
+
+    // Create placeholder
+    placeholder = document.createElement('li');
+    placeholder.className = 'sortable-placeholder';
+    placeholder.style.height = `${this.offsetHeight}px`;
+
+    // Delay hiding the original element so the drag ghost is created properly
+    requestAnimationFrame(() => {
+        this.classList.add('dragging-original');
+        this.parentNode.insertBefore(placeholder, this.nextSibling);
+    });
 }
 
 function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const item = e.target.closest('.todo-item');
-    if (item && item !== this) {
-        // Optional: Add visual indicator of where it will drop
+
+    const afterElement = getDragAfterElement(todoList, e.clientY);
+
+    if (afterElement == null) {
+        todoList.appendChild(placeholder);
+    } else {
+        todoList.insertBefore(placeholder, afterElement);
     }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
-    const targetItem = e.target.closest('.todo-item');
-    if (targetItem) {
-        const targetIndex = +targetItem.dataset.index;
-        if (draggedItemIndex !== null && draggedItemIndex !== targetIndex) {
-            const [draggedItem] = todos.splice(draggedItemIndex, 1);
-            todos.splice(targetIndex, 0, draggedItem);
-            await saveAndRender(); // Await to prevent race conditions
+
+    if (!draggedItem || !placeholder.parentNode) return;
+
+    // Insert dragged item at placeholder position
+    placeholder.parentNode.insertBefore(draggedItem, placeholder);
+    placeholder.remove();
+    draggedItem.classList.remove('dragging-original');
+
+    // Reconstruct todos array based on new DOM order
+    const newTodos = [];
+    const items = todoList.querySelectorAll('.todo-item');
+
+    items.forEach(item => {
+        const id = item.dataset.id;
+        const todo = todos.find(t => t.id === id);
+        if (todo) {
+            newTodos.push(todo);
         }
-    }
+    });
+
+    todos = newTodos;
+    await saveAndRender();
+
+    draggedItem = null;
+    placeholder = null;
 }
 
 function handleDragEnd(e) {
-    this.classList.remove('dragging');
-    draggedItemIndex = null;
+    if (draggedItem) {
+        draggedItem.classList.remove('dragging-original');
+        draggedItem.draggable = false; // Reset draggable state
+    }
+    if (placeholder && placeholder.parentNode) {
+        placeholder.remove();
+    }
+    draggedItem = null;
+    placeholder = null;
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.todo-item:not(.dragging-original)')];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
 init();

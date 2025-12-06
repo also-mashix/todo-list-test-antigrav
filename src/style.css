@@ -95,13 +95,24 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: grab;
+  cursor: default;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .todo-item.dragging {
   opacity: 0.5;
   cursor: grabbing;
+}
+
+.todo-item.dragging-original {
+  display: none !important;
+}
+
+.sortable-placeholder {
+  background-color: rgba(0, 0, 0, 0.03);
+  border: 2px dashed var(--border-color);
+  border-radius: 4px;
+  margin-bottom: 8px;
 }
 
 .todo-item.completed span {
@@ -112,6 +123,7 @@ button:hover {
 .todo-content {
   flex: 1;
   word-break: break-word;
+  cursor: text;
 }
 
 .delete-btn {
