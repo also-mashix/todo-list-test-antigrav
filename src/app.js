@@ -17,6 +17,7 @@ const MAX_TODO_LENGTH = 5000;
 
 let todoData = { lists: [] };
 let draggingItemConfig = null; // Store { listId, todoId, element }
+let dragType = null; // 'todo' or 'list'
 
 // Security utility: Ensure text is treated as plain string
 function sanitizeHTML(text) {
@@ -58,6 +59,18 @@ async function init() {
     newTodoInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addTodo();
     });
+
+    // Global Drag and Drop Handlers
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault(); // Allow dropping anywhere
+        // Forward to specific handlers based on what we are hovering over if needed
+        // But main logic is in specific container listeners or global handleDrop
+    });
+    document.addEventListener('drop', handleDrop);
+
+    // List Drag Support
+    // We attach this to the container so we can drag into empty space/bottom
+    todoList.addEventListener('dragover', handleListDragOver);
 
     // Create List Button
     renderCreateListBtn();
@@ -153,6 +166,21 @@ function renderLists() {
 
             const title = document.createElement('h3');
             title.textContent = list.title;
+
+            // List Drag Handle
+            const dragHandle = document.createElement('span');
+            dragHandle.className = 'list-drag-handle'; // Style this
+            dragHandle.textContent = '☰';
+            dragHandle.style.cursor = 'grab';
+            dragHandle.style.marginRight = '10px';
+            dragHandle.style.color = 'var(--text-secondary)';
+
+            // Only draggable via handle
+            dragHandle.addEventListener('mousedown', () => listContainer.draggable = true);
+            dragHandle.addEventListener('mouseup', () => listContainer.draggable = false);
+            dragHandle.addEventListener('mouseout', () => listContainer.draggable = false);
+
+            header.appendChild(dragHandle);
             header.appendChild(title);
 
             const delBtn = document.createElement('button');
@@ -171,7 +199,19 @@ function renderLists() {
 
         // Drag events for this specific list
         ul.addEventListener('dragover', handleDragOver);
-        ul.addEventListener('drop', (e) => handleDrop(e, list.id));
+
+        // List Container Drag Events (for reordering lists)
+        if (list.id !== 'default') {
+            listContainer.addEventListener('dragstart', (e) => handleListDragStart(e, list.id, listContainer));
+            listContainer.addEventListener('dragend', handleDragEnd);
+            // Allow dropping other lists onto this list container (for reordering)
+            listContainer.addEventListener('dragover', handleListDragOver);
+        } else {
+            // Default list can interact as a drop target for other lists too?
+            // Yes, to move lists above/below it.
+            listContainer.addEventListener('dragover', handleListDragOver);
+        }
+
 
         // Render items for this list
         list.items.forEach((todo, index) => {
@@ -398,6 +438,7 @@ let placeholder = null;
 let sourceListId = null;
 
 function handleDragStart(e, listId, index, element) {
+    dragType = 'todo';
     draggedItem = element;
     sourceListId = listId;
     e.dataTransfer.effectAllowed = 'move';
@@ -414,30 +455,81 @@ function handleDragStart(e, listId, index, element) {
     });
 }
 
+function handleListDragStart(e, listId, element) {
+    dragType = 'list';
+    draggedItem = element;
+    sourceListId = listId; // Not strictly needed for lists if we use DOM reorder, but good for consistency
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', element.innerHTML); // Required for Firefox
+
+    // Create placeholder for list
+    placeholder = document.createElement('li');
+    placeholder.className = 'sortable-placeholder list-placeholder';
+    placeholder.style.height = `${element.offsetHeight}px`;
+    placeholder.style.listStyle = 'none'; // Ensure no bullet
+    placeholder.style.marginBottom = '1rem'; // Match spacing
+
+    requestAnimationFrame(() => {
+        element.classList.add('dragging-original');
+        element.parentNode.insertBefore(placeholder, element.nextSibling);
+    });
+}
+
 function handleDragOver(e) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     e.stopPropagation(); // Stop bubbling
 
     // Target UL
-    let targetList = e.target.closest('ul.nested-todo-list');
-    if (!targetList) return;
+    if (dragType === 'todo') {
+        let targetList = e.target.closest('ul.nested-todo-list');
+        if (!targetList) return;
 
-    const afterElement = getDragAfterElement(targetList, e.clientY);
+        const afterElement = getDragAfterElement(targetList, e.clientY, '.todo-item');
 
-    if (afterElement == null) {
-        targetList.appendChild(placeholder);
-    } else {
-        targetList.insertBefore(placeholder, afterElement);
+        if (afterElement == null) {
+            targetList.appendChild(placeholder);
+        } else {
+            targetList.insertBefore(placeholder, afterElement);
+        }
     }
 }
 
-async function handleDrop(e, targetListId) {
+function handleListDragOver(e) {
+    if (dragType !== 'list') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    e.stopPropagation();
+
+    const todoListContainer = document.getElementById('todo-list');
+    const afterElement = getDragAfterElement(todoListContainer, e.clientY, '.list-container');
+
+    if (afterElement == null) {
+        todoListContainer.appendChild(placeholder);
+    } else {
+        todoListContainer.insertBefore(placeholder, afterElement);
+    }
+}
+
+async function handleDrop(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!draggedItem || !placeholder.parentNode) return;
+    if (!draggedItem || !placeholder || !placeholder.parentNode) return;
 
+    if (dragType === 'todo') {
+        await handleTodoDrop(e);
+    } else if (dragType === 'list') {
+        await handleListDrop(e);
+    }
+
+    draggedItem = null;
+    placeholder = null;
+    sourceListId = null;
+    dragType = null;
+}
+
+async function handleTodoDrop(e) {
     // Get the final destination list from the placeholder's parent
     // The handleDrop argument targetListId might be the list container, which is correct
     // But let's verify where placeholder actually ended up
@@ -451,10 +543,6 @@ async function handleDrop(e, targetListId) {
     placeholder.remove();
     draggedItem.classList.remove('dragging-original');
 
-    // Rebuild data from DOM
-    // For simplicity and robustness, we will rebuild the items array for both source and destination lists
-    // or just all lists. Given local nature, all lists is fine or just modified ones.
-
     const sourceList = todoData.lists.find(l => l.id === sourceListId);
     const destList = todoData.lists.find(l => l.id === finalListId);
 
@@ -463,37 +551,48 @@ async function handleDrop(e, targetListId) {
         reorderList(sourceList, finalParent);
     } else {
         // Moved across lists
-        // 1. Remove from source
-        // We know which item it was from the dragged element's dataset (but dataset might be stale if we relied on index)
-        // Best to rely on ID.
         const itemId = draggedItem.dataset.id;
         const itemIndex = sourceList.items.findIndex(i => i.id === itemId);
         if (itemIndex > -1) {
             const [item] = sourceList.items.splice(itemIndex, 1);
-            // 2. Add to dest (we need to find insertion index)
-            // We can do this by re-reading the DOM for the dest list
-            // But we need to insert the `item` object into destList.items at the correct spot
-
-            // Let's just re-read the DOM of the dest list to build the new items array
-            // But we need the item object. 
-            // Temporarily put it in a map or just assume we have it.
-
-            // Actually, `reorderList` logic works if we can map DOM IDs back to objects.
-            // But the item is now in `destList` DOM but not in `destList` data.
-            // So we need to add it to `destList` data before reordering? 
-            // Or just collect all IDs from DOM and find them in ANY list (or check sourceList/destList).
-
-            // Strategy: Find item object, remove from source, then use DOM order to rebuild dest list.
             destList.items.push(item); // Append temporarily, then sort by DOM
             reorderList(destList, finalParent);
         }
     }
 
     await saveAndRender();
+}
 
-    draggedItem = null;
-    placeholder = null;
-    sourceListId = null;
+async function handleListDrop(e) {
+    const finalParent = placeholder.parentNode; // Should be todoList element
+    if (!finalParent) return;
+
+    // Insert dragged list at final placeholder position
+    finalParent.insertBefore(draggedItem, placeholder);
+    placeholder.remove();
+    draggedItem.classList.remove('dragging-original');
+    if (draggedItem.draggable) draggedItem.draggable = false; // Reset
+
+    // Reorder data based on DOM
+    const newListOrder = [];
+    const listContainers = document.querySelectorAll('.list-container');
+
+    listContainers.forEach(container => {
+        const id = container.dataset.listId;
+        const listObj = todoData.lists.find(l => l.id === id);
+        if (listObj) {
+            newListOrder.push(listObj);
+        }
+    });
+
+    // Verify we didn't lose any (should match length)
+    if (newListOrder.length === todoData.lists.length) {
+        todoData.lists = newListOrder;
+        await saveAndRender();
+    } else {
+        console.error('List reorder failed: count mismatch');
+        renderLists(); // Revert
+    }
 }
 
 function reorderList(listData, listDom) {
@@ -530,8 +629,8 @@ function handleDragEnd(e) {
     sourceListId = null;
 }
 
-function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('.todo-item:not(.dragging-original)')];
+function getDragAfterElement(container, y, selector) {
+    const draggableElements = [...container.querySelectorAll(`${selector}:not(.dragging-original)`)];
 
     return draggableElements.reduce((closest, child) => {
         const box = child.getBoundingClientRect();
